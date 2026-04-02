@@ -82,3 +82,8 @@ def forget_password(request):
 def verification_code(request):
     raise NotImplementedError("Verification code functionality is not implemented yet")
 
+
+@require_http_methods(["POST"])
+def login_with_verification_code(request):
+    raise NotImplementedError("Login with verification code functionality is not implemented yet")
+

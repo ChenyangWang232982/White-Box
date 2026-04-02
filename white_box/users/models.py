@@ -1,6 +1,5 @@
 from django.db import models
 
-
 class User(models.Model):
     """user info """
     user_id = models.AutoField(primary_key=True) #AutoField会自动递增，primary_key=True表示这是主键
@@ -13,6 +12,7 @@ class User(models.Model):
     phone = models.CharField(max_length=20, blank=True)  # 电话号码
     created_at = models.DateTimeField(auto_now_add=True) #DateTimeField表示这是一个日期时间字段，auto_now_add=True表示在创建对象时自动设置为当前时间
     updated_at = models.DateTimeField(auto_now=True)
+    favorites = models.ManyToManyField('posts.PostContent', related_name='favorited_by', blank=True)  # 用户收藏的帖子
 
     def __str__(self):
         return self.username

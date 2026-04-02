@@ -16,8 +16,10 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-
+import dotenv
+BASEURL = dotenv.get_key('.env', 'BASEURL') or 'api'
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/users/', include('users.urls')),
+    path(f'{BASEURL}/users/', include('users.urls')),
+    path(f'{BASEURL}/posts/', include('posts.urls')),
 ]
