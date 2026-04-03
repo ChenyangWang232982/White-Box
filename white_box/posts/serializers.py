@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import PostContent, PostStats, Review, Favorite
+from .models import PostContent, PostStats, Report, Review, Favorite
 from users.models import User
 
 
@@ -127,3 +127,51 @@ class FavoriteSerializer(serializers.ModelSerializer):
         model = Favorite
         fields = ['post', 'created_at']
         read_only_fields = fields
+
+class ReportSerializer(serializers.ModelSerializer):
+    """Serializer for creating Report"""
+    class Meta:
+        model = Report
+        fields = ['reason', 'user', 'post']
+        read_only_fields = ['user', 'post']
+
+    def validate_reason(self, value):
+        """Validate reason is not empty"""
+        if not value.strip():
+            raise serializers.ValidationError('Reason cannot be empty')
+        return value
+
+    def validate(self, attrs):
+        """Validate user session and post_id from request context"""
+        user_id = self.context['request'].session.get('user_id')
+        if not user_id:
+            raise serializers.ValidationError('User must be authenticated')
+
+        post_id = self.context['view'].kwargs.get('post_id')
+        if not post_id:
+            raise serializers.ValidationError('post_id is required in URL')
+        if not PostContent.objects.filter(post_id=post_id).exists():
+            raise serializers.ValidationError('Post not found')
+
+        return attrs
+
+    def create(self, validated_data):
+        """Create report with current user and post"""
+        user_id = self.context['request'].session.get('user_id')
+        post_id = self.context['view'].kwargs.get('post_id')
+
+        try:
+            user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            raise serializers.ValidationError('User not found')
+
+        try:
+            post = PostContent.objects.get(post_id=post_id)
+        except PostContent.DoesNotExist:
+            raise serializers.ValidationError('Post not found')
+
+        return Report.objects.create(
+            user=user,
+            post=post,
+            reason=validated_data['reason']
+        )

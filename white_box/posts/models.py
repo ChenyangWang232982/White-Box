@@ -24,6 +24,7 @@ class PostStats(models.Model):
     views_count = models.IntegerField(default=0)
     shares_count = models.IntegerField(default=0)
     review_count = models.IntegerField(default=0)
+    reports_count = models.IntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
 
@@ -36,7 +37,7 @@ class Review(models.Model):
     user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='reviews', db_index=True)
     parent_review = models.ForeignKey(
         'self',
-        on_delete=models.CASCADE,
+        on_delete=models.CASCADE, 
         related_name='child_reviews',
         null=True,
         blank=True,
@@ -71,3 +72,13 @@ class Favorite(models.Model):
 
     def __str__(self):
         return f"User {self.user.user_id} favorited Post {self.post.post_id}"
+
+class Report(models.Model):
+    """Post report model - storing user reports for posts"""
+    post = models.ForeignKey(PostContent, on_delete=models.CASCADE, related_name='reports')
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='report_records')
+    reason = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"User {self.user.user_id} reported Post {self.post.post_id}"

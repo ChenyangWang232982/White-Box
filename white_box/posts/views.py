@@ -11,9 +11,16 @@ from .serializers import (
     PostContentSerializer,
     PostContentCreateSerializer,
     PostContentUpdateSerializer,
+    ReportSerializer
 )
 
-
+"""
+Request body for create_post:
+{
+    "title": "Post title",
+    "content": "Post content"
+}
+"""
 @require_http_methods(["POST"])
 def create_post(request):
     """Create a new post"""
@@ -48,7 +55,9 @@ def create_post(request):
     except Exception as e:
         return JsonResponse({'error': f'An error occurred: {str(e)} in {get_caller_name()}'}, status=500)
     
-
+"""
+Request body for get_post:
+No request body needed, just need post_id in the URL to identify which post we want to retrieve"""
 @require_http_methods(["GET"])
 def get_post(request, post_id):
     try:
@@ -100,7 +109,13 @@ def get_post(request, post_id):
         }, status=200)
     except PostContent.DoesNotExist:
         return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
-
+"""
+Request body for update_post:
+{
+    "title": "Updated title", (optional)
+    "content": "Updated content" (optional)
+}
+"""
 @require_http_methods(["PUT"])
 def update_post(request, post_id):
     """Update an existing post"""
@@ -132,7 +147,10 @@ def update_post(request, post_id):
     except PostContent.DoesNotExist:
         return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
 
-
+"""
+Request body for delete_post:
+No request body needed, just need post_id in the URL to identify which post we want to delete
+"""
 @require_http_methods(["DELETE"])
 def delete_post(request, post_id):
     try:
@@ -142,7 +160,9 @@ def delete_post(request, post_id):
         return JsonResponse({'message': 'Post deleted successfully'}, status=200)
     except PostContent.DoesNotExist:
         return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
-
+"""
+Request body for list_posts:
+No request body needed, just need user_id in the URL to identify which user's posts we want to retrieve"""
 @require_http_methods(["GET"])
 def list_posts(request, user_id):
     """List all posts by a user"""
@@ -157,7 +177,10 @@ def list_posts(request, user_id):
         }, status=200)
     except User.DoesNotExist:
         return JsonResponse({'error': f'User not found, error in {get_caller_name()}'}, status=404)
-
+"""
+Request body for like_post:
+No request body needed, just need user session to identify the user who is liking the post
+"""
 @require_http_methods(["POST"])
 def like_post(request, post_id):
     try:
@@ -169,7 +192,9 @@ def like_post(request, post_id):
         return JsonResponse({'message': 'Post liked successfully'}, status=200)
     except PostContent.DoesNotExist:
         return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
-
+"""
+Request body for favorite_post:
+No request body needed, just need user session to identify the user who is favoriting the post"""
 @require_http_methods(["POST"])
 def favorite_post(request, post_id):
     try:
@@ -188,7 +213,10 @@ def favorite_post(request, post_id):
         return JsonResponse({'error': f'User not found, error in {get_caller_name()}'}, status=404)
     except PostContent.DoesNotExist:
         return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
-
+"""
+Request body for get_favorites:
+No request body needed, just need user session to identify the user whose favorites we want to retrieve
+"""
 @require_http_methods(["GET"])
 def get_favorites(request):
     """Get all favorite posts for current user"""
@@ -207,7 +235,14 @@ def get_favorites(request):
     except User.DoesNotExist:
         return JsonResponse({'error': f'User not found, error in {get_caller_name()}'}, status=404)
 
-
+"""
+Request body for comment_post:
+{
+    "comment": "This is a comment",
+    "parent_reply_id": 123 (optional, required if review_id is provided),
+    "review_id": 456 (optional, required if parent_review_id is provided)
+}
+"""
 @require_http_methods(["POST"])
 def comment_post(request, post_id):
     try:
@@ -220,10 +255,32 @@ def comment_post(request, post_id):
         return JsonResponse({'error': f'Review not found, error in {get_caller_name()}'}, status=404)
     except User.DoesNotExist:
         return JsonResponse({'error': f'User not found, error in {get_caller_name()}'}, status=404)
+"""
+Request body for report_post:
+{
+    "reason": "Inappropriate content"
+}
+"""
+@require_http_methods(["POST"]) #Report a post
+def report_post(request, post_id):
+    try:
+         serializer = ReportSerializer(data=json.loads(request.body or "{}"), context={'request': request, 'view': request.resolver_match})
+         if serializer.is_valid(raise_exception=True):
+            serializer.save()
+            post = PostContent.objects.get(post_id=post_id)
+            with transaction.atomic():
+                post.reports_count += 1
+                post.save()
+            return JsonResponse({'message': 'Post reported successfully'}, status=200)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+    except DRFValidationError as e:
+        return JsonResponse({'error': 'Validation failed', 'details': e.detail}, status=400)
+    except PostContent.DoesNotExist:
+        return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
+    except User.DoesNotExist:
+        return JsonResponse({'error': f'User not found, error in {get_caller_name()}'}, status=404)
 
-@require_http_methods(["POST"])
-def report_post(request):
-    raise NotImplementedError("Report post functionality is not implemented yet")
 
 @require_http_methods(["POST"])
 def share_post(request):
