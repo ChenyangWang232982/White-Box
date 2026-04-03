@@ -34,28 +34,31 @@ class Review(models.Model):
     """Post review model - storing user reviews for posts"""
     post = models.ForeignKey(PostContent, on_delete=models.CASCADE, related_name='reviews', db_index=True)
     user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='reviews', db_index=True)
+    parent_review = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        related_name='child_reviews',
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    root_review = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        related_name='thread_replies',
+        null=True,
+        blank=True,
+        db_index=True,
+    )
     comment = models.CharField(max_length=500)
     created_at = models.DateTimeField(auto_now_add=True)
     likes_count = models.IntegerField(default=0)
     dislikes_count = models.IntegerField(default=0)
 
     def __str__(self):
+        if self.parent_review_id:
+            return f"Reply by User {self.user.user_id} for Review {self.parent_review_id}"
         return f"Review by User {self.user.user_id} for Post {self.post.post_id}"
-
-class Reply(models.Model):
-    """Post reply model - storing user replies to reviews"""
-    review = models.ForeignKey(Review, on_delete=models.CASCADE, related_name='replies', db_index=True)
-    parent_reply = models.ForeignKey('self', on_delete=models.CASCADE, related_name='child_replies', null=True, blank=True, db_index=True)
-    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='replies', db_index=True)
-    comment = models.CharField(max_length=500)
-    created_at = models.DateTimeField(auto_now_add=True)
-    likes_count = models.IntegerField(default=0)
-    dislikes_count = models.IntegerField(default=0)
-
-    def __str__(self):
-        if self.parent_reply_id:
-            return f"Reply by User {self.user.user_id} for Reply {self.parent_reply_id}"
-        return f"Reply by User {self.user.user_id} for Review {self.review_id}"
 
 class Favorite(models.Model):
     """Post favorite model - storing user favorites for posts"""

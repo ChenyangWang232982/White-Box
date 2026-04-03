@@ -1,9 +1,6 @@
-from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
-from django.contrib.auth.hashers import check_password, make_password
-from django.db import IntegrityError
-from users.models import User
+from users.serializers import RegisterSerializer, LoginSerializer
 import json
 from white_box.utils import get_caller_name
 
@@ -13,27 +10,24 @@ def register(request):
     """Register a new user"""
     try:
         data = json.loads(request.body)
-        username = data.get('username')
-        password = data.get('password')
-        email = data.get('email')
+        serializer = RegisterSerializer(data=data)
         
-        if not username or not password or not email:
-            return JsonResponse({'success': False, 'message': 'Username, password, and email are required'}, status=400)
-        
-        user = User.objects.create(
-            username=username,
-            password=make_password(password),
-            email=email
-        )
-        
-        return JsonResponse({
-            'success': True,
-            'message': 'Registration successful',
-            'user_id': user.user_id
-        }, status=201)
+        if serializer.is_valid(): #is_valid()方法会调用serializer中的validate_username、validate_email和validate方法来验证输入的数据是否符合要求，如果验证通过，is_valid()返回True，并且可以通过serializer.validated_data获取验证后的数据；如果验证失败，is_valid()返回False，并且可以通过serializer.errors获取错误信息。
+            user = serializer.save() #save()方法会调用serializer中的create方法来创建一个新的User对象，并将验证后的数据传递给create方法，create方法会返回创建的User对象。
+            return JsonResponse({
+                'success': True,
+                'message': 'Registration successful',
+                'user_id': user.user_id
+            }, status=201)
+        else:
+            return JsonResponse({
+                'success': False,
+                'message': 'Registration failed',
+                'errors': serializer.errors
+            }, status=400)
     
-    except IntegrityError:
-        return JsonResponse({'success': False, 'message': 'Username or email already exists'}, status=400)
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'message': 'Invalid JSON body'}, status=400)
     except Exception as e:
         print(f"Error in {get_caller_name()}: {str(e)}")
         return JsonResponse({'success': False, 'message': str(e)}, status=500)
@@ -44,32 +38,30 @@ def login(request):
     """User login"""
     try:
         data = json.loads(request.body)
-        username = data.get('username')
-        password = data.get('password')
+        serializer = LoginSerializer(data=data)
         
-        if not username or not password:
-            return JsonResponse({'success': False, 'message': 'Username and password are required'}, status=400)
-        
-        user = User.objects.get(username=username)
-        
-        if not check_password(password, user.password):
-            return JsonResponse({'success': False, 'message': 'Username or password is incorrect'}, status=401)
-        
-        if not user.is_active:
-            return JsonResponse({'success': False, 'message': 'Account is disabled'}, status=403)
-        
-        request.session['user_id'] = user.user_id
-        request.session['username'] = user.username
-        
-        return JsonResponse({
-            'success': True,
-            'message': 'Login successful',
-            'user_id': user.user_id,
-            'username': user.username
-        }, status=200)
+        if serializer.is_valid():
+            user = serializer.validated_data['user']
+            request.session['user_id'] = user.user_id
+            request.session['username'] = user.username
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Login successful',
+                'user_id': user.user_id,
+                'username': user.username
+            }, status=200)
+        else:
+            errors = serializer.errors
+            is_disabled = 'Account is disabled' in str(errors)
+            return JsonResponse({
+                'success': False,
+                'message': 'Account is disabled' if is_disabled else 'Login failed',
+                'errors': errors
+            }, status=403 if is_disabled else 401)
     
-    except User.DoesNotExist:
-        return JsonResponse({'success': False, 'message': 'Username or password is incorrect'}, status=401)
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'message': 'Invalid JSON body'}, status=400)
     except Exception as e:
         print(f"Error in {get_caller_name()}: {str(e)}")
         return JsonResponse({'success': False, 'message': str(e)}, status=500)
