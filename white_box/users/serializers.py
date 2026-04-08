@@ -1,6 +1,10 @@
 from rest_framework import serializers
-from django.contrib.auth.hashers import make_password
-from .models import User
+from django.contrib.auth.hashers import make_password, check_password
+from django.utils import timezone
+from datetime import timedelta
+import random
+from .models import User, EmailVerificationCode
+from users.utils.email import email_verification_code
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -66,3 +70,174 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['user_id', 'username', 'email', 'avatar', 'bio', 'phone', 'created_at', 'is_active']
         read_only_fields = ['user_id', 'created_at']
+
+
+class VerificationCodeRequestSerializer(serializers.Serializer):
+    """Request serializer for sending email verification code."""
+
+    email = serializers.EmailField(required=True)
+    purpose = serializers.ChoiceField(
+        choices=EmailVerificationCode.PURPOSE_CHOICES,
+        required=False,
+        default=EmailVerificationCode.PURPOSE_LOGIN,
+    )
+
+    def validate(self, attrs):
+        email = attrs['email'].strip().lower()
+        purpose = attrs['purpose']
+
+        user = User.objects.filter(email=email).first()
+        if user is None:
+            raise serializers.ValidationError('User not found')
+        if not user.is_active:
+            raise serializers.ValidationError('Account is disabled')
+
+        throttle_limit = timezone.now() - timedelta(seconds=60)
+        has_recent_code = EmailVerificationCode.objects.filter(
+            email=email,
+            purpose=purpose,
+            created_at__gte=throttle_limit,
+        ).exists()
+        if has_recent_code:
+            raise serializers.ValidationError('Please wait 60 seconds before requesting a new code')
+
+        attrs['email'] = email
+        attrs['user'] = user
+        return attrs
+
+    def create(self, validated_data):
+        email = validated_data['email']
+        purpose = validated_data['purpose']
+        code = f"{random.randint(100000, 999999)}"
+        now = timezone.now()
+
+        EmailVerificationCode.objects.filter(
+            email=email,
+            purpose=purpose,
+            used_at__isnull=True,
+            expires_at__gt=now,
+        ).update(used_at=now)
+
+        EmailVerificationCode.objects.create(
+            email=email,
+            code_hash=make_password(code),
+            purpose=purpose,
+            expires_at=now + timedelta(minutes=5),
+        )
+
+        email_verification_code(email=email, code=code, purpose=purpose)
+        return {'email': email, 'purpose': purpose}
+
+
+class LoginWithVerificationCodeSerializer(serializers.Serializer):
+    """Serializer for login by email + verification code."""
+
+    email = serializers.EmailField(required=True)
+    code = serializers.CharField(required=True, min_length=6, max_length=6)
+
+    def validate(self, attrs):
+        email = attrs['email'].strip().lower()
+        code = attrs['code'].strip()
+        now = timezone.now()
+
+        verification = EmailVerificationCode.objects.filter(
+            email=email,
+            purpose=EmailVerificationCode.PURPOSE_LOGIN,
+            used_at__isnull=True,
+            expires_at__gt=now,
+        ).order_by('-created_at').first()
+
+        if verification is None:
+            raise serializers.ValidationError('Verification code is invalid or expired')
+
+        if verification.attempt_count >= 5:
+            verification.used_at = now
+            verification.save(update_fields=['used_at'])
+            raise serializers.ValidationError('Too many failed attempts, please request a new code')
+
+        if not check_password(code, verification.code_hash):
+            verification.attempt_count += 1
+            if verification.attempt_count >= 5:
+                verification.used_at = now
+                verification.save(update_fields=['attempt_count', 'used_at'])
+            else:
+                verification.save(update_fields=['attempt_count'])
+            raise serializers.ValidationError('Verification code is invalid or expired')
+
+        user = User.objects.filter(email=email).first()
+        if user is None:
+            raise serializers.ValidationError('User not found')
+        if not user.is_active:
+            raise serializers.ValidationError('Account is disabled')
+
+        attrs['email'] = email
+        attrs['user'] = user
+        attrs['verification'] = verification
+        return attrs
+
+    def create(self, validated_data):
+        verification = validated_data['verification']
+        verification.used_at = timezone.now()
+        verification.save(update_fields=['used_at'])
+        return {'user': validated_data['user']}
+
+
+class ForgetPasswordSerializer(serializers.Serializer):
+    """Serializer for reset password using email verification code."""
+
+    email = serializers.EmailField(required=True)
+    code = serializers.CharField(required=True, min_length=6, max_length=6)
+    new_password = serializers.CharField(required=True, min_length=6)
+    password_confirm = serializers.CharField(required=True, min_length=6)
+
+    def validate(self, attrs):
+        email = attrs['email'].strip().lower()
+        code = attrs['code'].strip()
+        now = timezone.now()
+
+        if attrs['new_password'] != attrs['password_confirm']:
+            raise serializers.ValidationError({'password': 'Passwords do not match'})
+
+        verification = EmailVerificationCode.objects.filter(
+            email=email,
+            purpose=EmailVerificationCode.PURPOSE_RESET_PASSWORD,
+            used_at__isnull=True,
+            expires_at__gt=now,
+        ).order_by('-created_at').first()
+
+        if verification is None:
+            raise serializers.ValidationError('Verification code is invalid or expired')
+
+        if verification.attempt_count >= 5:
+            verification.used_at = now
+            verification.save(update_fields=['used_at'])
+            raise serializers.ValidationError('Too many failed attempts, please request a new code')
+
+        if not check_password(code, verification.code_hash):
+            verification.attempt_count += 1
+            if verification.attempt_count >= 5:
+                verification.used_at = now
+                verification.save(update_fields=['attempt_count', 'used_at'])
+            else:
+                verification.save(update_fields=['attempt_count'])
+            raise serializers.ValidationError('Verification code is invalid or expired')
+
+        user = User.objects.filter(email=email).first()
+        if user is None:
+            raise serializers.ValidationError('User not found')
+
+        attrs['email'] = email
+        attrs['user'] = user
+        attrs['verification'] = verification
+        return attrs
+
+    def create(self, validated_data):
+        user = validated_data['user']
+        user.password = make_password(validated_data['new_password'])
+        user.save(update_fields=['password', 'updated_at'])
+
+        verification = validated_data['verification']
+        verification.used_at = timezone.now()
+        verification.save(update_fields=['used_at'])
+
+        return {'user_id': user.user_id}

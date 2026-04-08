@@ -281,9 +281,74 @@ def report_post(request, post_id):
     except User.DoesNotExist:
         return JsonResponse({'error': f'User not found, error in {get_caller_name()}'}, status=404)
 
-
+"""
+Request body for share_post:
+No request body needed, just need post_id in the URL to identify which post we want to share
+"""
 @require_http_methods(["POST"])
-def share_post(request):
-    raise NotImplementedError("Share post functionality is not implemented yet")
-
-
+def share_post(request, post_id):
+    try:
+        post = PostContent.objects.get(post_id=post_id)
+        with transaction.atomic():
+            post.stats.shares_count += 1
+            post.stats.save()
+        return JsonResponse({'message': 'Post shared successfully'}, status=200)
+    except PostContent.DoesNotExist:
+        return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
+"""
+Request body for unlike_post:
+No request body needed, just need user session to identify the user who is unliking the post
+"""
+@require_http_methods(["POST"])
+def unlike_post(request, post_id):
+    try:
+        post_content = PostContent.objects.get(post_id=post_id)
+        with transaction.atomic():
+            post_stats, _ = PostStats.objects.get_or_create(post=post_content) # 确保 PostStats 存在
+            post_stats.dislikes_count -= 1
+            post_stats.save()
+        return JsonResponse({'message': 'Post unliked successfully'}, status=200)
+    except PostContent.DoesNotExist:
+        return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
+"""
+Request body for unfavorite_post:
+No request body needed, just need user session to identify the user who is unfavoriting the post
+"""  
+@require_http_methods(["POST"])
+def unfavorite_post(request, post_id):
+    try:
+        user_id = request.session.get('user_id')
+        if not user_id:
+            return JsonResponse({'error': 'User must be logged in'}, status=401)
+        post = PostContent.objects.get(post_id=post_id)
+        user = User.objects.get(user_id=user_id)
+        with transaction.atomic():
+            user.favorites.remove(post)
+            post_stats, _ = PostStats.objects.get_or_create(post=post)
+            post_stats.favorites_count -= 1
+            post_stats.save()
+    except PostContent.DoesNotExist:
+        return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404) 
+"""
+Request body for search_posts:
+{
+    "keyword": "search keyword"
+}
+"""
+@require_http_methods(["POST"])
+def search_posts(request):
+    try:
+        data = json.loads(request.body or "{}")
+        keyword = data.get('keyword', '')
+        if not keyword:
+            return JsonResponse({'error': 'Keyword is required for searching'}, status=400)
+        
+        posts = PostContent.objects.filter(title__icontains=keyword).order_by('-created_at')
+        serializer = PostContentSerializer(posts, many=True)
+        
+        return JsonResponse({
+            'message': 'Search completed successfully',
+            'posts': serializer.data
+        }, status=200)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)

@@ -12,6 +12,7 @@ urlpatterns = [
     path(f'favorite_post/<str:post_id>/', views.favorite_post, name='favorite_post'),
     path(f'get_favorites/<str:user_id>/', views.get_favorites, name='get_favorites'),
     path(f'report_post/<str:post_id>/', views.report_post, name='report_post'),
+    path(f'share_post/<str:post_id>/', views.share_post, name='share_post'),
     
 
 ]
