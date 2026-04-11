@@ -1,9 +1,12 @@
 import json
 from django.http import JsonResponse
-from users.models import User
+from django.contrib.auth import get_user_model
 from posts.models import PostContent, Review, PostStats
 from posts.serializers import ReviewCreateSerializer
 from white_box.utils import get_caller_name
+
+
+User = get_user_model()
 
 
 def create_review_or_reply(request, post_id=None, review_id=None):
@@ -20,12 +23,12 @@ def create_review_or_reply(request, post_id=None, review_id=None):
             }, status=400)
         
         # Get user from session
-        user_id = request.session.get('user_id')
+        user_id = request.user.id if request.user.is_authenticated else request.session.get('user_id')
         if not user_id:
             return JsonResponse({'error': 'User must be authenticated'}, status=401)
         
         try:
-            user = User.objects.get(user_id=user_id)
+            user = User.objects.get(pk=user_id)
         except User.DoesNotExist:
             return JsonResponse({'error': 'User not found'}, status=401)
         
@@ -80,7 +83,7 @@ def create_review_or_reply(request, post_id=None, review_id=None):
                     'reply_id': reply.id,
                     'review_id': root_review.id,
                     'parent_reply_id': parent_reply_id,
-                    'user_id': reply.user.user_id,
+                    'user_id': reply.user_id,
                     'comment': reply.comment,
                     'created_at': reply.created_at.isoformat(),
                     'likes_count': reply.likes_count,
@@ -109,7 +112,7 @@ def create_review_or_reply(request, post_id=None, review_id=None):
             'message': 'Review added successfully',
             'review': {
                 'review_id': review.id,
-                'user_id': review.user.user_id,
+                'user_id': review.user_id,
                 'comment': review.comment,
                 'created_at': review.created_at.isoformat(),
                 'likes_count': review.likes_count,

@@ -1,4 +1,5 @@
 from django.http import JsonResponse
+from django.contrib.auth import login as auth_login
 from django.views.decorators.http import require_http_methods
 from users.serializers import (
     RegisterSerializer,
@@ -23,7 +24,7 @@ def register(request):
             return JsonResponse({
                 'success': True,
                 'message': 'Registration successful',
-                'user_id': user.user_id
+                'user_id': user.id
             }, status=201)
         else:
             return JsonResponse({
@@ -48,13 +49,14 @@ def login(request):
         
         if serializer.is_valid():
             user = serializer.validated_data['user']
-            request.session['user_id'] = user.user_id
+            auth_login(request, user)
+            request.session['user_id'] = user.id
             request.session['username'] = user.username
             
             return JsonResponse({
                 'success': True,
                 'message': 'Login successful',
-                'user_id': user.user_id,
+                'user_id': user.id,
                 'username': user.username
             }, status=200)
         else:
@@ -135,13 +137,14 @@ def login_with_verification_code(request):
         if serializer.is_valid():
             result = serializer.save()
             user = result['user']
-            request.session['user_id'] = user.user_id
+            auth_login(request, user)
+            request.session['user_id'] = user.id
             request.session['username'] = user.username
 
             return JsonResponse({
                 'success': True,
                 'message': 'Login successful',
-                'user_id': user.user_id,
+                'user_id': user.id,
                 'username': user.username,
             }, status=200)
 

@@ -1,6 +1,9 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 from .models import PostContent, PostStats, Report, Review, Favorite
-from users.models import User
+
+
+User = get_user_model()
 
 
 class PostContentSerializer(serializers.ModelSerializer):
@@ -36,11 +39,12 @@ class PostContentCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create post with current user"""
-        user_id = self.context['request'].session.get('user_id')
+        request = self.context['request']
+        user_id = request.user.id if request.user.is_authenticated else request.session.get('user_id')
         if not user_id:
             raise serializers.ValidationError('User must be authenticated')
         try:
-            user = User.objects.get(user_id=user_id)
+            user = User.objects.get(pk=user_id)
         except User.DoesNotExist:
             raise serializers.ValidationError('User not found')
         
@@ -143,7 +147,8 @@ class ReportSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         """Validate user session and post_id from request context"""
-        user_id = self.context['request'].session.get('user_id')
+        request = self.context['request']
+        user_id = request.user.id if request.user.is_authenticated else request.session.get('user_id')
         if not user_id:
             raise serializers.ValidationError('User must be authenticated')
 
@@ -157,11 +162,12 @@ class ReportSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create report with current user and post"""
-        user_id = self.context['request'].session.get('user_id')
+        request = self.context['request']
+        user_id = request.user.id if request.user.is_authenticated else request.session.get('user_id')
         post_id = self.context['view'].kwargs.get('post_id')
 
         try:
-            user = User.objects.get(user_id=user_id)
+            user = User.objects.get(pk=user_id)
         except User.DoesNotExist:
             raise serializers.ValidationError('User not found')
 

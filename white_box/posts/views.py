@@ -2,10 +2,10 @@ import json
 from django.http import JsonResponse
 from django.db import transaction
 from django.views.decorators.http import require_http_methods
+from django.contrib.auth import get_user_model
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from white_box.utils import get_caller_name
-from .models import PostContent, Review, PostStats
-from users.models import User
+from .models import PostContent, Review, PostStats, Favorite
 from .utils.comment import create_review_or_reply
 from .serializers import (
     PostContentSerializer,
@@ -13,6 +13,10 @@ from .serializers import (
     PostContentUpdateSerializer,
     ReportSerializer
 )
+from users.utils.permissions import can_manage_post, login_required_json
+
+
+User = get_user_model()
 
 """
 Request body for create_post:
@@ -22,13 +26,10 @@ Request body for create_post:
 }
 """
 @require_http_methods(["POST"])
+@login_required_json
 def create_post(request):
     """Create a new post"""
     try:
-        user_id = request.session.get('user_id')
-        if not user_id:
-            return JsonResponse({'error': 'User must be authenticated'}, status=401)
-
         data = json.loads(request.body or "{}")
         serializer = PostContentCreateSerializer(data=data, context={'request': request})
         
@@ -76,7 +77,7 @@ def get_post(request, post_id):
             def serialize_reply(reply_obj):
                 return {
                     'id': reply_obj.id,
-                    'user_id': reply_obj.user.user_id,
+                    'user_id': reply_obj.user_id,
                     'comment': reply_obj.comment,
                     'created_at': reply_obj.created_at.isoformat(),
                     'likes_count': reply_obj.likes_count,
@@ -88,7 +89,7 @@ def get_post(request, post_id):
 
             reviews_data.append({
                 'id': review.id,
-                'user_id': review.user.user_id,
+                'user_id': review.user_id,
                 'comment': review.comment,
                 'created_at': review.created_at.isoformat(),
                 'likes_count': review.likes_count,
@@ -117,10 +118,13 @@ Request body for update_post:
 }
 """
 @require_http_methods(["PUT"])
+@login_required_json
 def update_post(request, post_id):
     """Update an existing post"""
     try:
         post_content = PostContent.objects.get(post_id=post_id)
+        if not can_manage_post(request.user, post_content):
+            return JsonResponse({'error': 'Permission denied'}, status=403)
         data = json.loads(request.body or "{}")
         serializer = PostContentUpdateSerializer(instance=post_content, data=data, partial=True)
         
@@ -152,9 +156,12 @@ Request body for delete_post:
 No request body needed, just need post_id in the URL to identify which post we want to delete
 """
 @require_http_methods(["DELETE"])
+@login_required_json
 def delete_post(request, post_id):
     try:
         post_content = PostContent.objects.get(post_id=post_id)
+        if not can_manage_post(request.user, post_content):
+            return JsonResponse({'error': 'Permission denied'}, status=403)
         with transaction.atomic():
             post_content.delete()
         return JsonResponse({'message': 'Post deleted successfully'}, status=200)
@@ -167,7 +174,7 @@ No request body needed, just need user_id in the URL to identify which user's po
 def list_posts(request, user_id):
     """List all posts by a user"""
     try:
-        user = User.objects.get(user_id=user_id)
+        user = User.objects.get(pk=user_id)
         posts = PostContent.objects.filter(user=user).order_by('-created_at')
         serializer = PostContentSerializer(posts, many=True)
         
@@ -196,18 +203,17 @@ def like_post(request, post_id):
 Request body for favorite_post:
 No request body needed, just need user session to identify the user who is favoriting the post"""
 @require_http_methods(["POST"])
+@login_required_json
 def favorite_post(request, post_id):
     try:
-        user_id = request.session.get('user_id')
-        if not user_id:
-            return JsonResponse({'error': 'User must be authenticated'}, status=401)
-        user = User.objects.get(user_id=user_id)
+        user = request.user
         post_content = PostContent.objects.get(post_id=post_id)
         with transaction.atomic():
-            user.favorites.add(post_content)
+            favorite, created = Favorite.objects.get_or_create(user=user, post=post_content)
             post_stats, _ = PostStats.objects.get_or_create(post=post_content)
-            post_stats.favorites_count += 1
-            post_stats.save()
+            if created:
+                post_stats.favorites_count += 1
+                post_stats.save()
         return JsonResponse({'message': 'Post favorited successfully'}, status=200)
     except User.DoesNotExist:
         return JsonResponse({'error': f'User not found, error in {get_caller_name()}'}, status=404)
@@ -218,14 +224,12 @@ Request body for get_favorites:
 No request body needed, just need user session to identify the user whose favorites we want to retrieve
 """
 @require_http_methods(["GET"])
+@login_required_json
 def get_favorites(request):
     """Get all favorite posts for current user"""
     try:
-        user_id = request.session.get('user_id')
-        if not user_id:
-            return JsonResponse({'error': 'User must be authenticated'}, status=401)
-        user = User.objects.get(user_id=user_id)
-        favorite_posts = user.favorites.all().order_by('-created_at')
+        user = request.user
+        favorite_posts = PostContent.objects.filter(favorites__user=user).order_by('-created_at')
         serializer = PostContentSerializer(favorite_posts, many=True)
         
         return JsonResponse({
@@ -244,6 +248,7 @@ Request body for comment_post:
 }
 """
 @require_http_methods(["POST"])
+@login_required_json
 def comment_post(request, post_id):
     try:
         return create_review_or_reply(request, post_id=post_id)
@@ -262,6 +267,7 @@ Request body for report_post:
 }
 """
 @require_http_methods(["POST"]) #Report a post
+@login_required_json
 def report_post(request, post_id):
     try:
          serializer = ReportSerializer(data=json.loads(request.body or "{}"), context={'request': request, 'view': request.resolver_match})
@@ -315,20 +321,22 @@ Request body for unfavorite_post:
 No request body needed, just need user session to identify the user who is unfavoriting the post
 """  
 @require_http_methods(["POST"])
+@login_required_json
 def unfavorite_post(request, post_id):
     try:
-        user_id = request.session.get('user_id')
-        if not user_id:
-            return JsonResponse({'error': 'User must be logged in'}, status=401)
         post = PostContent.objects.get(post_id=post_id)
-        user = User.objects.get(user_id=user_id)
+        user = request.user
         with transaction.atomic():
-            user.favorites.remove(post)
+            deleted_count, _ = Favorite.objects.filter(user=user, post=post).delete()
             post_stats, _ = PostStats.objects.get_or_create(post=post)
-            post_stats.favorites_count -= 1
-            post_stats.save()
+            if deleted_count > 0 and post_stats.favorites_count > 0:
+                post_stats.favorites_count -= 1
+                post_stats.save()
+        return JsonResponse({'message': 'Post unfavorited successfully'}, status=200)
     except PostContent.DoesNotExist:
-        return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404) 
+        return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
+    except User.DoesNotExist:
+        return JsonResponse({'error': f'User not found, error in {get_caller_name()}'}, status=404)
 """
 Request body for search_posts:
 {

@@ -1,17 +1,21 @@
 from rest_framework import serializers
+from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.models import Group
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
 from datetime import timedelta
 import random
-from .models import User, EmailVerificationCode
+from .models import EmailVerificationCode
 from users.utils.email import email_verification_code
+
+
+User = get_user_model()
 
 
 class RegisterSerializer(serializers.ModelSerializer):
     """Serializer for user registration"""
     password = serializers.CharField(write_only=True, min_length=6) #write_only=True表示这个字段只用于输入，不会在序列化输出中显示，min_length=6表示密码最少需要6个字符
     password_confirm = serializers.CharField(write_only=True, min_length=6) #用于确认密码输入，write_only=True表示这个字段只用于输入，不会在序列化输出中显示，min_length=6表示密码最少需要6个字符
-
     class Meta:
         model = User
         fields = ['username', 'email', 'password', 'password_confirm']
@@ -35,10 +39,13 @@ class RegisterSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        """Create user with hashed password"""
+        """Create user with Django built-in auth model"""
         validated_data.pop('password_confirm') #从validated_data中移除password_confirm字段，因为它不需要保存到数据库中
-        validated_data['password'] = make_password(validated_data['password'])
-        return User.objects.create(**validated_data)
+        password = validated_data.pop('password')
+        user = User.objects.create_user(password=password, **validated_data)
+        default_group, _ = Group.objects.get_or_create(name='user')
+        user.groups.add(default_group)
+        return user
 
 
 class LoginSerializer(serializers.Serializer):
@@ -48,13 +55,8 @@ class LoginSerializer(serializers.Serializer):
 
     def validate(self, data):
         """Validate credentials"""
-        try:
-            user = User.objects.get(username=data['username'])
-        except User.DoesNotExist:
-            raise serializers.ValidationError('Username or password is incorrect')
-
-        from django.contrib.auth.hashers import check_password
-        if not check_password(data['password'], user.password):
+        user = authenticate(username=data['username'], password=data['password'])
+        if user is None:
             raise serializers.ValidationError('Username or password is incorrect')
 
         if not user.is_active:
@@ -66,10 +68,12 @@ class LoginSerializer(serializers.Serializer):
 
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for user profile"""
+    user_id = serializers.IntegerField(source='id', read_only=True)
+
     class Meta:
         model = User
-        fields = ['user_id', 'username', 'email', 'avatar', 'bio', 'phone', 'created_at', 'is_active']
-        read_only_fields = ['user_id', 'created_at']
+        fields = ['user_id', 'username', 'email', 'is_active', 'is_staff', 'date_joined']
+        read_only_fields = ['user_id', 'is_active', 'is_staff', 'date_joined']
 
 
 class VerificationCodeRequestSerializer(serializers.Serializer):
@@ -234,10 +238,10 @@ class ForgetPasswordSerializer(serializers.Serializer):
     def create(self, validated_data):
         user = validated_data['user']
         user.password = make_password(validated_data['new_password'])
-        user.save(update_fields=['password', 'updated_at'])
+        user.save(update_fields=['password'])
 
         verification = validated_data['verification']
         verification.used_at = timezone.now()
         verification.save(update_fields=['used_at'])
 
-        return {'user_id': user.user_id}
+        return {'user_id': user.id}

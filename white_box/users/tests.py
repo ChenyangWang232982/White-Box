@@ -1,14 +1,16 @@
 import pytest
 import json
 from django.urls import reverse
-from django.contrib.auth.hashers import make_password
-from users.models import User
+from django.contrib.auth import get_user_model
+
+
+User = get_user_model()
 
 @pytest.fixture
 def test_user(db):
-    return User.objects.create(
+    return User.objects.create_user(
         username='testuser',
-        password=make_password('testpassword'),
+        password='testpassword',
         email='testuser@example.com'
     )
 

@@ -1,11 +1,12 @@
 from django.db import models
+from django.conf import settings
 import uuid
 
 
 class PostContent(models.Model):
     """post content model"""
     post_id = models.CharField(max_length=50, unique=True, default=uuid.uuid4)
-    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='posts', null=True, blank=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='posts', null=True, blank=True)
     title = models.CharField(max_length=200)
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
@@ -34,7 +35,7 @@ class PostStats(models.Model):
 class Review(models.Model):
     """Post review model - storing user reviews for posts"""
     post = models.ForeignKey(PostContent, on_delete=models.CASCADE, related_name='reviews', db_index=True)
-    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='reviews', db_index=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reviews', db_index=True)
     parent_review = models.ForeignKey(
         'self',
         on_delete=models.CASCADE, 
@@ -58,27 +59,27 @@ class Review(models.Model):
 
     def __str__(self):
         if self.parent_review_id:
-            return f"Reply by User {self.user.user_id} for Review {self.parent_review_id}"
-        return f"Review by User {self.user.user_id} for Post {self.post.post_id}"
+            return f"Reply by User {self.user_id} for Review {self.parent_review_id}"
+        return f"Review by User {self.user_id} for Post {self.post.post_id}"
 
 class Favorite(models.Model):
     """Post favorite model - storing user favorites for posts"""
     post = models.ForeignKey(PostContent, on_delete=models.CASCADE, related_name='favorites')
-    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='favorite_records')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='favorite_records')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         unique_together = ('post', 'user')  # 同一用户不能重复收藏同一帖子
 
     def __str__(self):
-        return f"User {self.user.user_id} favorited Post {self.post.post_id}"
+        return f"User {self.user_id} favorited Post {self.post.post_id}"
 
 class Report(models.Model):
     """Post report model - storing user reports for posts"""
     post = models.ForeignKey(PostContent, on_delete=models.CASCADE, related_name='reports')
-    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='report_records')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='report_records')
     reason = models.CharField(max_length=500)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"User {self.user.user_id} reported Post {self.post.post_id}"
+        return f"User {self.user_id} reported Post {self.post.post_id}"
