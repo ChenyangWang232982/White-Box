@@ -38,11 +38,10 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'password': 'Passwords do not match'})
         return data
 
-    def create(self, validated_data):
-        """Create user with Django built-in auth model"""
+    def create(self, validated_data): #The content of validated_data is { 'username': 'xxx', 'email': 'xxx', 'password': 'xxx', 'password_confirm': 'xxx' }
         validated_data.pop('password_confirm') #从validated_data中移除password_confirm字段，因为它不需要保存到数据库中
         password = validated_data.pop('password')
-        user = User.objects.create_user(password=password, **validated_data)
+        user = User.objects.create_user(password=password, **validated_data) #**validated_data表示将剩余的字段作为关键字参数传递给create_user方法
         default_group, _ = Group.objects.get_or_create(name='user')
         user.groups.add(default_group)
         return user

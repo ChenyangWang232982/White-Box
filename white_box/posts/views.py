@@ -189,6 +189,7 @@ Request body for like_post:
 No request body needed, just need user session to identify the user who is liking the post
 """
 @require_http_methods(["POST"])
+@login_required_json
 def like_post(request, post_id):
     try:
         post_content = PostContent.objects.get(post_id=post_id)
@@ -292,6 +293,7 @@ Request body for share_post:
 No request body needed, just need post_id in the URL to identify which post we want to share
 """
 @require_http_methods(["POST"])
+@login_required_json
 def share_post(request, post_id):
     try:
         post = PostContent.objects.get(post_id=post_id)
@@ -306,6 +308,7 @@ Request body for unlike_post:
 No request body needed, just need user session to identify the user who is unliking the post
 """
 @require_http_methods(["POST"])
+@login_required_json
 def unlike_post(request, post_id):
     try:
         post_content = PostContent.objects.get(post_id=post_id)
