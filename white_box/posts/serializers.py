@@ -1,9 +1,16 @@
 from rest_framework import serializers
+from rest_framework.exceptions import APIException, NotFound, NotAuthenticated
 from django.contrib.auth import get_user_model
 from .models import PostContent, PostStats, Report, Review, Favorite
 
 
 User = get_user_model()
+
+
+class ConflictError(APIException):
+    status_code = 409
+    default_detail = 'Conflict'
+    default_code = 'conflict'
 
 
 class PostContentSerializer(serializers.ModelSerializer):
@@ -140,44 +147,40 @@ class ReportSerializer(serializers.ModelSerializer):
         read_only_fields = ['user', 'post']
 
     def validate_reason(self, value):
-        """Validate reason is not empty"""
+        """Validate reason is not empty."""
         if not value.strip():
             raise serializers.ValidationError('Reason cannot be empty')
         return value
 
     def validate(self, attrs):
-        """Validate user session and post_id from request context"""
         request = self.context['request']
         user_id = request.user.id if request.user.is_authenticated else request.session.get('user_id')
         if not user_id:
-            raise serializers.ValidationError('User must be authenticated')
+            raise NotAuthenticated('User must be authenticated')
 
-        post_id = self.context['view'].kwargs.get('post_id')
+        post_id = self.context.get('post_id')
         if not post_id:
             raise serializers.ValidationError('post_id is required in URL')
-        if not PostContent.objects.filter(post_id=post_id).exists():
-            raise serializers.ValidationError('Post not found')
 
+        user = User.objects.filter(pk=user_id).first()
+        if user is None:
+            raise NotAuthenticated('User not found')
+
+        post = PostContent.objects.filter(post_id=post_id).first()
+        if post is None:
+            raise NotFound('Post not found')
+
+        if Report.objects.filter(user=user, post=post).exists():
+            raise ConflictError('You have already reported this post')
+
+        attrs['user'] = user
+        attrs['post'] = post
         return attrs
 
     def create(self, validated_data):
-        """Create report with current user and post"""
-        request = self.context['request']
-        user_id = request.user.id if request.user.is_authenticated else request.session.get('user_id')
-        post_id = self.context['view'].kwargs.get('post_id')
-
-        try:
-            user = User.objects.get(pk=user_id)
-        except User.DoesNotExist:
-            raise serializers.ValidationError('User not found')
-
-        try:
-            post = PostContent.objects.get(post_id=post_id)
-        except PostContent.DoesNotExist:
-            raise serializers.ValidationError('Post not found')
-
+        """Create report using validated user/post from validate()."""
         return Report.objects.create(
-            user=user,
-            post=post,
-            reason=validated_data['reason']
+            user=validated_data['user'],
+            post=validated_data['post'],
+            reason=validated_data['reason'] #validated_data中已经包含了经过验证的user和post对象，因此直接使用它们来创建Report实例，而不需要再次从数据库中查询。这种方式更高效，因为我们已经在validate()方法中确保了user和post的有效性，并且避免了不必要的数据库查询。
         )

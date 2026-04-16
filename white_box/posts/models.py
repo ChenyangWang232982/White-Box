@@ -32,6 +32,34 @@ class PostStats(models.Model):
     def __str__(self):
         return f"Post {self.post.post_id} Statistics"
 
+
+class PostReaction(models.Model):
+    """Per-user reaction state for a post: like/dislike/neutral."""
+
+    STATE_DISLIKE = -1
+    STATE_NEUTRAL = 0
+    STATE_LIKE = 1
+    STATE_CHOICES = [
+        (STATE_DISLIKE, 'Dislike'),
+        (STATE_NEUTRAL, 'Neutral'),
+        (STATE_LIKE, 'Like'),
+    ]
+
+    post = models.ForeignKey(PostContent, on_delete=models.CASCADE, related_name='reactions')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='post_reactions')
+    viewed = models.BooleanField(default=False)
+    favorited = models.BooleanField(default=False)
+    state = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_NEUTRAL)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['post', 'user'], name='uniq_post_user_reaction'),
+        ]
+
+    def __str__(self):
+        return f"User {self.user_id} reaction {self.state} on Post {self.post.post_id}"
+
 class Review(models.Model):
     """Post review model - storing user reviews for posts"""
     post = models.ForeignKey(PostContent, on_delete=models.CASCADE, related_name='reviews', db_index=True)
@@ -80,6 +108,12 @@ class Report(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='report_records')
     reason = models.CharField(max_length=500)
     created_at = models.DateTimeField(auto_now_add=True)
+    already_reported = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['post', 'user'], name='uniq_post_user_report'),
+        ]
 
     def __str__(self):
         return f"User {self.user_id} reported Post {self.post.post_id}"

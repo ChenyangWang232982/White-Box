@@ -1,22 +1,40 @@
 import json
 from django.http import JsonResponse
 from django.db import transaction
+from django.db import IntegrityError
+from django.db.models import Count, Q
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth import get_user_model
 from rest_framework.exceptions import ValidationError as DRFValidationError
+from rest_framework.exceptions import NotFound as DRFNotFound
+from rest_framework.exceptions import NotAuthenticated as DRFNotAuthenticated
 from white_box.utils import get_caller_name
-from .models import PostContent, Review, PostStats, Favorite
+from .models import PostContent, Review, PostStats, Favorite, PostReaction
 from .utils.comment import create_review_or_reply
 from .serializers import (
     PostContentSerializer,
     PostContentCreateSerializer,
     PostContentUpdateSerializer,
-    ReportSerializer
+    ReportSerializer,
+    ConflictError,
 )
 from users.utils.permissions import can_manage_post, login_required_json
 
 
 User = get_user_model()
+
+
+def _sync_reaction_counts(post):
+    """Recalculate likes/dislikes counters from reaction records."""
+    post_stats, _ = PostStats.objects.get_or_create(post=post)
+    counts = post.reactions.aggregate(
+        likes=Count('id', filter=Q(state=PostReaction.STATE_LIKE)),
+        dislikes=Count('id', filter=Q(state=PostReaction.STATE_DISLIKE)),
+    )
+    post_stats.likes_count = counts['likes'] or 0
+    post_stats.dislikes_count = counts['dislikes'] or 0
+    post_stats.save(update_fields=['likes_count', 'dislikes_count', 'updated_at'])
+    return post_stats
 
 """
 Request body for create_post:
@@ -96,6 +114,18 @@ def get_post(request, post_id):
                 'dislikes_count': review.dislikes_count,
                 'replies': replies_data,
             })
+
+        # Mark viewed for authenticated users and increment views_count once per user.
+        if request.user.is_authenticated:
+            with transaction.atomic():
+                reaction, _ = PostReaction.objects.get_or_create(post=post_content, user=request.user)
+                if not reaction.viewed:
+                    reaction.viewed = True
+                    reaction.save(update_fields=['viewed', 'updated_at'])
+                    post_stats, _ = PostStats.objects.get_or_create(post=post_content)
+                    post_stats.views_count += 1
+                    post_stats.save(update_fields=['views_count', 'updated_at'])
+        
         
         return JsonResponse({
             'message': 'Post retrieved successfully',
@@ -193,13 +223,19 @@ No request body needed, just need user session to identify the user who is likin
 def like_post(request, post_id):
     try:
         post_content = PostContent.objects.get(post_id=post_id)
+        user = request.user
         with transaction.atomic():
-            post_stats, _ = PostStats.objects.get_or_create(post=post_content) # 确保 PostStats 存在
-            post_stats.likes_count += 1
-            post_stats.save()
+            reaction, _ = PostReaction.objects.get_or_create(post=post_content, user=user)
+            post_stats, _ = PostStats.objects.get_or_create(post=post_content)
+            if reaction.state != PostReaction.STATE_LIKE:
+                reaction.state = PostReaction.STATE_LIKE
+                post_stats.likes_count += 1
+                reaction.save(update_fields=['state', 'updated_at'])   
+            _sync_reaction_counts(post_content) #确保在任何情况下都能正确同步点赞和点踩的计数，避免出现数据不一致的情况。
         return JsonResponse({'message': 'Post liked successfully'}, status=200)
     except PostContent.DoesNotExist:
         return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
+
 """
 Request body for favorite_post:
 No request body needed, just need user session to identify the user who is favoriting the post"""
@@ -271,22 +307,28 @@ Request body for report_post:
 @login_required_json
 def report_post(request, post_id):
     try:
-         serializer = ReportSerializer(data=json.loads(request.body or "{}"), context={'request': request, 'view': request.resolver_match})
-         if serializer.is_valid(raise_exception=True):
-            serializer.save()
-            post = PostContent.objects.get(post_id=post_id)
-            with transaction.atomic():
-                post.reports_count += 1
-                post.save()
-            return JsonResponse({'message': 'Post reported successfully'}, status=200)
+        with transaction.atomic():
+            serializer = ReportSerializer(data=json.loads(request.body or "{}"), context={'request': request, 'post_id': post_id})
+            if serializer.is_valid(raise_exception=True):
+                report = serializer.save()
+                post_stats, _ = PostStats.objects.get_or_create(post=report.post) #_表示如果PostStats对象不存在就创建一个新的对象，并返回一个元组，其中第一个元素是PostStats对象，第二个元素是一个布尔值，表示是否创建了新的对象。在这个上下文中，我们只关心PostStats对象本身，因此使用_来忽略第二个元素。
+                post_stats.reports_count += 1
+                post_stats.save()
+                return JsonResponse({'message': 'Post reported successfully'}, status=200)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+    except DRFNotAuthenticated as e:
+        return JsonResponse({'error': str(e)}, status=401)
+    except DRFNotFound as e:
+        return JsonResponse({'error': str(e)}, status=404)
+    except ConflictError as e:
+        return JsonResponse({'error': str(e)}, status=409)
+    except IntegrityError:
+        return JsonResponse({'error': 'You have already reported this post'}, status=409)
     except DRFValidationError as e:
         return JsonResponse({'error': 'Validation failed', 'details': e.detail}, status=400)
-    except PostContent.DoesNotExist:
-        return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
-    except User.DoesNotExist:
-        return JsonResponse({'error': f'User not found, error in {get_caller_name()}'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': f'An error occurred: {str(e)} in {get_caller_name()}'}, status=500)
 
 """
 Request body for share_post:
@@ -298,8 +340,9 @@ def share_post(request, post_id):
     try:
         post = PostContent.objects.get(post_id=post_id)
         with transaction.atomic():
-            post.stats.shares_count += 1
-            post.stats.save()
+            post_stats, _ = PostStats.objects.get_or_create(post=post)
+            post_stats.shares_count += 1
+            post_stats.save(update_fields=['shares_count', 'updated_at'])
         return JsonResponse({'message': 'Post shared successfully'}, status=200)
     except PostContent.DoesNotExist:
         return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
@@ -312,11 +355,14 @@ No request body needed, just need user session to identify the user who is unlik
 def unlike_post(request, post_id):
     try:
         post_content = PostContent.objects.get(post_id=post_id)
+        user = request.user
         with transaction.atomic():
-            post_stats, _ = PostStats.objects.get_or_create(post=post_content) # 确保 PostStats 存在
-            post_stats.dislikes_count -= 1
-            post_stats.save()
-        return JsonResponse({'message': 'Post unliked successfully'}, status=200)
+            reaction, _ = PostReaction.objects.get_or_create(post=post_content, user=user)
+            if reaction.state != PostReaction.STATE_DISLIKE:
+                reaction.state = PostReaction.STATE_DISLIKE
+                reaction.save(update_fields=['state', 'updated_at'])
+            _sync_reaction_counts(post_content)
+        return JsonResponse({'message': 'Post disliked successfully'}, status=200)
     except PostContent.DoesNotExist:
         return JsonResponse({'error': f'Post not found, error in {get_caller_name()}'}, status=404)
 """
