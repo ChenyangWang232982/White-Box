@@ -5,6 +5,7 @@ app_name = 'users'
 urlpatterns = [
     path(f'register/', views.register, name='register'),
     path(f'login/', views.login, name='login'),
+    path(f'logout/', views.logout, name='logout'),
     path(f'token/refresh/', TokenRefreshView.as_view(), name='token_refresh'), 
     path(f'token/verify/', TokenVerifyView.as_view(), name='token_verify'),
     path(f'forget_password/', views.forget_password, name='forget_password'),

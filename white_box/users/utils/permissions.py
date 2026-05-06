@@ -27,7 +27,7 @@ def login_required_json(view_func): #这是一个装饰器函数，用于保护�
     return wrapper
 
 
-def in_groups(user, group_names):
+def in_groups(user, group_names): #这个函数用于检查一个用户是否属于指定的组（角色）。它接受一个用户对象和一个组名列表作为参数。如果组名列表为空，函数直接返回False，表示没有任何组要求；如果组名列表不为空，函数会检查用户是否属于列表中的任意一个组，如果是，则返回True，否则返回False。
     if not group_names:
         return False
     return user.groups.filter(name__in=group_names).exists()
