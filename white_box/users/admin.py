@@ -1,4 +1,4 @@
 from django.contrib import admin
 from .models import EmailVerificationCode
 
-admin.site.register(EmailVerificationCode)
+admin.site.register(EmailVerificationCode) #这行代码将EmailVerificationCode模型注册到Django的admin站点，使得管理员可以通过Django的管理界面来管理这个模型的数据。通过注册模型，管理员可以在后台界面中查看、添加、修改和删除EmailVerificationCode实例，从而方便地管理与电子邮件验证相关的数据。

@@ -1,5 +1,5 @@
 from django.http import JsonResponse
-from django.contrib.auth import login as auth_login
+from django.contrib.auth import login as auth_login, logout as auth_logout
 from django.views.decorators.http import require_http_methods
 from django.conf import settings
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -169,6 +169,17 @@ def login_with_verification_code(request):
         }, status=401)
     except json.JSONDecodeError:
         return JsonResponse({'success': False, 'message': 'Invalid JSON body'}, status=400)
+    except Exception as e:
+        print(f"Error in {get_caller_name()}: {str(e)}")
+        return JsonResponse({'success': False, 'message': str(e)}, status=500)
+"""
+request body: empty
+"""
+@require_http_methods(["POST"])
+def logout(request):
+    try:
+        auth_logout(request) 
+        return JsonResponse({'success': True, 'message': 'Logout successful'}, status=200)
     except Exception as e:
         print(f"Error in {get_caller_name()}: {str(e)}")
         return JsonResponse({'success': False, 'message': str(e)}, status=500)
